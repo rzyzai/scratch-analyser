@@ -7,18 +7,31 @@
 ## API
 
 ```c++
-  czh::Parser parser;
+czh::Parser parser;
 // 导入文件
-std::ifstream f1(argv[1]);
-std::ifstream f2(argv[2]);
-auto s1 = parser.parse(nlohmann::ordered_json::parse(f1));
-auto s2 = parser.parse(nlohmann::ordered_json::parse(f2));
+std::ifstream file(argv[1]);
+auto scratch = parser.parse(nlohmann::ordered_json::parse(file));
 // 输出信息
-std::cout << argv[1] << ": \n" << s1.info() << std::endl;
-std::cout << argv[2] << ": \n" << s2.info() << std::endl;
+auto info = scratch.info();
 // 比对文件
-std::cout << s1.assert_equal(s2) << std::endl;
+auto result = scratch.compare(scratch2);
   ```
+
+### Scratch::compare(scratch)
+
+- 比对两个Scratch的变量、列表和程序块
+
+#### CompareResult
+
+- type: 比对结果
+- message: 比对信息
+- info: 比对详情
+
+#### CompareResultType
+
+- Matched 匹配
+- LogicalMismatched 程序块逻辑不匹配
+- ValueMismatched 程序块的输入值不匹配
 
 ## 注意
 
@@ -28,3 +41,4 @@ std::cout << s1.assert_equal(s2) << std::endl;
 
 - [nlohmann/json](https://github.com/nlohmann/json)
 - [tfussell/miniz-cpp](https://github.com/tfussell/miniz-cpp)
+- [fmtlib](https://github.com/fmtlib/fmt)

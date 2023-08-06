@@ -27,30 +27,37 @@ int main(int argc, char** argv)
 {
   if (argc != 3)
   {
-    std::cerr << "Usage: " << argv[0] << " Scratch_path_1 Scratch_path_2" << std::endl;
+    fmt::println("Usage: {} sb3_path_1 sb3_path_2", argv[0]);
     return -1;
   }
   miniz_cpp::zip_file file1(argv[1]);
   if (!file1.has_file("project.json"))
   {
-    std::cerr << "Error: " << argv[1] << " can't be loaded.";
+    fmt::println("Error: {} can't be loaded.", argv[1]);
     return -1;
   }
   miniz_cpp::zip_file file2(argv[2]);
   if (!file2.has_file("project.json"))
   {
-    std::cerr << "Error: " << argv[2] << " can't be loaded.";
+    fmt::println("Error: {} can't be loaded.", argv[2]);
     return -1;
   }
   czh::Parser parser;
   auto s1 = parser.parse(nlohmann::ordered_json::parse(file1.read("project.json")));
   auto s2 = parser.parse(nlohmann::ordered_json::parse(file2.read("project.json")));
-  std::cout << argv[1] << ": \n" << s1.info() << std::endl;
-  std::cout << argv[2] << ": \n" << s2.info() << std::endl;
-  std::cout << s1.assert_equal(s2) << std::endl;
-//  auto j = nlohmann::ordered_json::parse("{\"NUM1\":[3,[12,\"过渡J2-const\",\"!aoOiWP?f/%f$S{^TI~j\"],[4,\"1\"]],\"NUM2\":[1,[4,\"20\"]]}");
-//  std::vector<std::string> n;
-//  czh::get_name(j, n);
-//  czh::get_ids(j, n);
+  fmt::println("{}:\n {}", argv[1], s1.info());
+  fmt::println("{}:\n {}", argv[2], s2.info());
+  auto cmp_result =  s1.compare(s2);
+  bool passed = true;
+  for(auto& r : cmp_result)
+  {
+    if(r.type == czh::CompareResultType::LogicalMismatch)
+    {
+      passed = false;
+      fmt::println("{}: {}\n{}", czh::red("Logical Mismatch"), r.message, r.info);
+    }
+  }
+  if(passed)
+    fmt::println(czh::green("Passed."));
   return 0;
 }

@@ -22,6 +22,7 @@
 #ifndef SCRATCH_ANALYSER_SCRATCH_HPP
 #define SCRATCH_ANALYSER_SCRATCH_HPP
 #pragma once
+#include "utils.hpp"
 #include "nlohmann/json.hpp"
 #include <iostream>
 #include <fstream>
@@ -31,7 +32,6 @@
 
 namespace czh
 {
-  
   void get_name(const nlohmann::ordered_json &j, std::vector<std::string> &ret)
   {
     if (j.is_array() || j.is_object())
@@ -47,24 +47,26 @@ namespace czh
     }
   }
   
-  void get_ids(const nlohmann::ordered_json &j, std::vector<std::string> &ret)
-  {
-    if (j.is_array() || j.is_object())
-    {
-      for (auto it = j.begin(); it != j.end(); ++it)
-      {
-        if (it->is_object() && it.key().size() == 20)
-          ret.emplace_back(it.key());
-        else
-          get_ids(it.value(), ret);
-      }
-    }
-    else if (j.is_string())
-    {
-      if (auto s = j.get<std::string>(); s.size() == 20)
-        ret.emplace_back(s);
-    }
-  }
+//  void get_ids(const nlohmann::ordered_json &j, std::vector<std::string> &ret)
+//  {
+//    if (j.is_array() || j.is_object())
+//    {
+//      for (auto it = j.begin(); it != j.end(); ++it)
+//      {
+//        if (it->is_object() && it.key().size() == 20)
+//          ret.emplace_back(it.key());
+//        else
+//          get_ids(it.value(), ret);
+//      }
+//    }
+//    else if (j.is_string())
+//    {
+//      if (auto s = j.get<std::string>(); s.size() == 20)
+//        ret.emplace_back(s);
+//    }
+//  }
+//
+
   bool is_format_equal(const nlohmann::ordered_json &j1, const nlohmann::ordered_json &j2)
   {
     if (j1.type() != j2.type())
@@ -87,30 +89,48 @@ namespace czh
   }
   
   template<typename T>
-  auto find_with_hint(const typename std::vector<T>::const_iterator& it1,
-                      const typename std::vector<T>::const_iterator& it2,
-                      const typename std::vector<T>::const_iterator& hint,
-                      const std::function<bool(const T&)>& pred)
+  auto find_if_with_hint(const typename std::vector<T>::const_iterator &it1,
+                         const typename std::vector<T>::const_iterator &it2,
+                         const typename std::vector<T>::const_iterator &hint,
+                         const std::function<bool(const T &)> &pred)
   {
-    if(pred(*hint))
+    if (pred(*hint))
       return hint;
     auto r1 = std::find_if(hint, it2, pred);
-    if(r1 != it2) return r1;
+    if (r1 != it2) return r1;
     auto r2 = std::find_if(it1, hint, pred);
-    if(r2 != hint) return r2;
+    if (r2 != hint) return r2;
     return it2;
   }
   
+  template<typename T>
+  auto find_with_hint(const typename std::vector<T>::const_iterator &it1,
+                      const typename std::vector<T>::const_iterator &it2,
+                      const typename std::vector<T>::const_iterator &hint,
+                      const T &v)
+  {
+    return find_if_with_hint<T>(it1, it2, hint, [&v](auto &&t) { return v == t; });
+  }
   
+  enum class CompareResultType
+  {
+    Matched, LogicalMismatch, ValueMisMatch
+  };
+  struct CompareResult
+  {
+    CompareResultType type;
+    std::string message;
+    std::string info;
+  };
   
   struct Block
   {
     size_t pos;
     std::string id;
     std::string parent_id;
-    std::vector<std::string> contained_id;
+    std::string next_id;
     std::string opcode;
-    nlohmann::ordered_json input;
+    nlohmann::ordered_json inputs;
     nlohmann::ordered_json fields;
     bool shadow;
     bool disabled;
@@ -119,136 +139,173 @@ namespace czh
     int x;
     int y;
   public:
-    std::string to_string(size_t indent) const
+    std::string info() const
     {
-      std::string space(indent, ' ');
-      std::string nl_space = "\n";
-      nl_space.insert(nl_space.end(), indent, ' ');
-      return space + "id: " + id + nl_space + "opcode: " + opcode + nl_space + "input: " + input.dump() + nl_space +
-             "fields: " + fields.dump()
-             + nl_space + "shadow: " + (shadow ? "True" : "False") + nl_space + "disabled: " +
-             (disabled ? "True" : "False")
-             + nl_space + "toplevel: " + (toplevel ? "True" : "False") + nl_space + "mutation: " + mutation.dump() +
-             "\n";
+      return fmt::format("  id: {}\n  opcode: {}\n  inputs: {}\n  fields: {}\n  shadow: {}\n"
+                         "  disabled: {}\n  toplevel: {}\n  mutation: {}",
+                         id, opcode, inputs.dump(), fields.dump(), shadow, disabled, toplevel, mutation.dump());
     }
     
-    bool operator==(const Block& b) const
+    bool operator==(const Block &b) const
     {
       return opcode == b.opcode
-      && is_format_equal(input, b.input)
+      && is_format_equal(inputs, b.inputs)
       && is_format_equal(fields, b.fields)
       && shadow == b.shadow
       && disabled == b.disabled
       && toplevel == b.toplevel
       && is_format_equal(mutation, b.mutation);
     }
-
-    std::tuple<bool, std::string, size_t, size_t> assert_equal(const Block& b) const
+    
+    std::vector<CompareResult> compare(const Block &b) const
     {
-      std::string ret;
-      size_t logic_mismatch, value_mismatch = 0;
-      auto report_block = [&ret](const Block &block1, const Block &block2)
-      {
-        ret += "Block1 Info:\n" + block1.to_string(4);
-        ret += "Block2 Info:\n" + block2.to_string(4);
-      };
+      std::vector<CompareResult> ret;
       if (opcode != b.opcode)
       {
-        ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Block opcode (" + opcode + ", " + b.opcode + ").\n";
-        report_block(*this, b);
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different Block opcode.",
+            .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                info(), b.info())
+        });
       }
-      else if (input != b.input)
+      else if (inputs != b.inputs)
       {
-        if (is_format_equal(input, b.input))
+        if (is_format_equal(inputs, b.inputs))
         {
-          ret += "\u001b[33mValue Mismatch\u001b[0m: Different Block input value (" + input.dump() + ", " +
-                 b.input.dump() + ").\n";
-          //report_block(*this, b);
-          ++value_mismatch;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::ValueMisMatch,
+              .message = "Different Block inputs value",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
         else
         {
-          ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Block input format (" + input.dump() + ", " +
-                 b.input.dump() + ").\n";
-          report_block(*this, b);
-          ret += "\u001b[31mTerminated\u001b[0m.\n";
-          ++logic_mismatch;
-          //return ret;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::LogicalMismatch,
+              .message = "Different Block inputs format",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
       }
       else if (fields != b.fields)
       {
         if (is_format_equal(fields, b.fields))
         {
-          ret += "\u001b[33mValue Mismatch\u001b[0m: Different Block fields value (" + fields.dump() + ", " +
-                 b.fields.dump() + ").\n";
-          //report_block(*this, b);
-          ++value_mismatch;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::ValueMisMatch,
+              .message = "Different Block fields value",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
         else
         {
-          ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Block fields format (" + fields.dump() + ", " +
-                 b.fields.dump() + ").\n";
-          report_block(*this, b);
-          ret += "\u001b[31mTerminated\u001b[0m.\n";
-          ++logic_mismatch;
-          //return ret;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::LogicalMismatch,
+              .message = "Different Block inputs format",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
       }
       else if (shadow != b.shadow)
       {
-        ret += std::string("\u001b[31mLogic Mismatch\u001b[0m: Different Block shadow (")
-               + (shadow ? "T" : "F") + ", " + (b.shadow ? "T" : "F") + std::string(").\n");
-        report_block(*this, b);
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different Block shadow",
+            .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                info(), b.info())
+        });
       }
       else if (disabled != b.disabled)
       {
-        ret += std::string("\u001b[31mLogic Mismatch\u001b[0m: Different Block disabled (")
-               + (disabled ? "T" : "F") + ", " + (b.disabled ? "T" : "F") + std::string(").\n");
-        report_block(*this, b);
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different Block disabled",
+            .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                info(), b.info())
+        });
       }
       else if (toplevel != b.toplevel)
       {
-        ret += std::string("\u001b[31mLogic Mismatch\u001b[0m: Different Block toplevel (")
-               + (toplevel ? "T" : "F") + ", " + (b.toplevel ? "T" : "F") + std::string(").\n");
-        report_block(*this, b);
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different Block toplevel",
+            .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                info(), b.info())
+        });
       }
       else if (mutation != b.mutation)
       {
         if (is_format_equal(mutation, b.mutation))
         {
-          ret += "\u001b[33mValue Mismatch\u001b[0m: Different Block mutation value (" + mutation.dump() + ", " +
-                 b.mutation.dump() + ").\n";
-          //report_block(*this, b);
-          ++value_mismatch;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::ValueMisMatch,
+              .message = "Different Block mutation value",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
         else
         {
-          ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Block mutation format (" + mutation.dump() + ", " +
-                 b.mutation.dump() + ").\n";
-          report_block(*this, b);
-          ret += "\u001b[31mTerminated\u001b[0m.\n";
-          ++logic_mismatch;
-          //return ret;
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::LogicalMismatch,
+              .message = "Different Block mutation format",
+              .info = fmt::format("Block Info 1: {}\nBlock Info 2: {}",
+                                  info(), b.info())
+          });
         }
       }
-      return {(logic_mismatch == 0), ret, logic_mismatch, value_mismatch};
+      return ret;
     }
   };
   
+  const Block* to_parent(const std::vector<Block>& v, const Block* block)
+  {
+    if(block->parent_id.empty()) return nullptr;
+    const Block* parent = nullptr;
+    for(size_t i = 0; i < v.size(); ++i)
+    {
+      if (v[i].id == block->parent_id)
+      {
+        parent = &v[i];
+        break;
+      }
+    }
+    return parent;
+  }
+  
+  const Block* to_toplevel(const std::vector<Block>& v, const Block* block)
+  {
+    auto parent = to_parent(v, block);
+    if(parent == nullptr)
+      return block;
+    return to_toplevel(v, parent);
+  }
+  
+  // TODO  Not very strong
+  bool strong_block_equal(const std::vector<Block>& bs1, const std::vector<Block>& bs2, const Block& block1, const Block& block2)
+  {
+    if (block1 == block2)
+    {
+      auto p1 = to_toplevel(bs1, &block1);
+      auto p2 = to_toplevel(bs2, &block2);
+      if ((p1 == nullptr && p2 != nullptr) || (p1 != nullptr && p2 == nullptr))
+        return false;
+      if (p1 == nullptr)
+        return true;
+      else
+        return *p1 == *p2;
+    }
+    else
+      return false;
+  }
+  
   class Parser;
+  
   class Scratch
   {
     friend Parser;
@@ -259,23 +316,20 @@ namespace czh
   public:
     std::string info() const
     {
-      return "variables: " + std::to_string(vars.size())
-             + "\nlists: " + std::to_string(lists.size())
-             + "\nblocks: " + std::to_string(blocks.size()) + "\n";
+      return fmt::format("Variables: {}, Lists: {}, Blocks: {}", vars.size(), lists.size(), blocks.size());
     }
     
-    std::string assert_equal(const Scratch &sc) const
+    std::vector<CompareResult> compare(const Scratch &sc) const
     {
-      std::string ret;
-      size_t value_mismatch = 0;
-      size_t logic_mismatch = 0;
+      std::vector<CompareResult> ret;
       // Variables
       if (vars.size() != sc.vars.size())
       {
-        ret += "\u001b[31mLogic Mismatch\u001b[0m: Different number of variables\n";
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different number of variables.",
+            .info = fmt::format("({}, {})", vars.size(), sc.vars.size())
+        });
       }
       else
       {
@@ -283,28 +337,33 @@ namespace czh
         {
           if (it1->first != it2->first)
           {
-            ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Name of variables (" + it1->first + ", " + it2->first + ").\n";
-            ret += "\u001b[31mTerminated\u001b[0m.\n";
-            ++logic_mismatch;
-            //return ret;
+            ret.emplace_back(CompareResult{
+                .type = CompareResultType::LogicalMismatch,
+                .message = "Different name of variables.",
+                .info = fmt::format("({}, {})", it1->first, it2->first)
+            });
           }
         }
         for (auto it1 = vars.cbegin(), it2 = sc.vars.cbegin(); it1 != vars.cend(); ++it1, ++it2)
         {
           if (it1->second != it2->second)
-            ret +=
-                "\u001b[33mValue Mismatch\u001b[0m: Different value of variables ([" + it1->first + "] " + it1->second + ", " +
-                it2->second + ").\n";
-          ++value_mismatch;
+          {
+            ret.emplace_back(CompareResult{
+                .type = CompareResultType::ValueMisMatch,
+                .message = "Different value of variables.",
+                .info = fmt::format("({}, {}, {})", it1->first, it1->second, it2->second)
+            });
+          }
         }
       }
       // Lists
       if (lists.size() != sc.lists.size())
       {
-        ret += "\u001b[31mLogic Mismatch\u001b[0m: Different number of lists\n";
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different number of lists.",
+            .info = fmt::format("({}, {})", lists.size(), sc.lists.size())
+        });
       }
       else
       {
@@ -312,65 +371,98 @@ namespace czh
         {
           if (it1->first != it2->first)
           {
-            ret += "\u001b[31mLogic Mismatch\u001b[0m: Different Name of lists (" + it1->first + ", " + it2->first + ").\n";
-            ret += "\u001b[31mTerminated\u001b[0m.\n";
-            ++logic_mismatch;
-            //return ret;
+            ret.emplace_back(CompareResult{
+                .type = CompareResultType::LogicalMismatch,
+                .message = "Different name of lists.",
+                .info = fmt::format("({}, {})", it1->first, it2->first)
+            });
           }
         }
         for (auto it1 = lists.cbegin(), it2 = sc.lists.cbegin(); it1 != lists.cend(); ++it1, ++it2)
         {
           if (it1->second != it2->second)
-            ret += "\u001b[33mValue Mismatch\u001b[0m: Different value of lists ([" + it1->first + "] "
-                   + nlohmann::ordered_json{it1->second}.dump() + ", " + nlohmann::ordered_json{it2->second}.dump() +
-                   ").\n";
-          ++value_mismatch;
+          {
+            ret.emplace_back(CompareResult{
+                .type = CompareResultType::ValueMisMatch,
+                .message = "Different value of lists.",
+                .info = fmt::format("({}, {}, {})", it1->first,
+                                    nlohmann::ordered_json(it1->second).dump(),
+                                    nlohmann::ordered_json(it2->second).dump())
+            });
+          }
         }
       }
       // Blocks
       if (blocks.size() != sc.blocks.size())
       {
-        ret += "\u001b[31mLogic Mismatch\u001b[0m: Different number of blocks\n";
-        ret += "\u001b[31mTerminated\u001b[0m.\n";
-        ++logic_mismatch;
-        //return ret;
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different number of blocks.",
+            .info = fmt::format("({}, {})", blocks.size(), sc.blocks.size())
+        });
       }
       else
       {
-        for (auto it1 = blocks.cbegin(); it1 != blocks.cend(); ++it1)
-        {
-          auto r = find_with_hint<Block>(
-              sc.blocks.cbegin(), sc.blocks.cend(), sc.blocks.cbegin() + (it1 - blocks.cbegin()),
-              [it1](const Block &b) -> bool
+        auto match_block =  [&ret](const std::vector<Block>& bs1, const std::vector<Block>& bs2, int n)
+        {        for (auto it
+            = bs1.cbegin(); it != bs1.cend(); ++it)
+          {
+            auto r = find_if_with_hint<Block>(
+                bs2.cbegin(), bs2.cend(),
+                bs2.cbegin() + (it - bs1.cbegin()),
+                [&it, &bs1, &bs2](const Block& block) -> bool
+                {
+                  return strong_block_equal(bs1, bs2, *it, block);
+                });
+            if (r == bs2.cend())
+            {
+              const Block* b = &*it;
+              auto tb = to_toplevel(bs1, b);
+              std::string tb_info = "Failed to get toplevel.";
+              if(tb != nullptr)
+                tb_info = tb->info();
+  
+              if(tb != nullptr && tb->opcode != "procedures_definition")
               {
-                // return std::get<0>(it1->assert_equal(b));
-                return *it1 == b;
-              });
-          if (r == sc.blocks.end())
-          {
-            ret += "\u001b[31mLogic Mismatch\u001b[0m: Mismatched Block\n";
-            ret += "Block Info:\n" + it1->to_string(4);
-            ret += "\u001b[31mTerminated\u001b[0m.\n";
-            ++logic_mismatch;
+                ret.emplace_back(CompareResult{
+                    .type = CompareResultType::LogicalMismatch,
+                    .message = fmt::format("Scratch {} has a mismatched Block.", n),
+                    .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}",
+                                        it->info(), tb_info)
+                });
+              }
+              else if(tb != nullptr)
+              {
+                std::string related_info = "Failed to get related block.";
+                for(auto& rel : bs1)
+                {
+                  if (rel.parent_id == tb->id && rel.opcode == "procedures_prototype")
+                  {
+                    related_info = rel.info();
+                    break;
+                  }
+                }
+                ret.emplace_back(CompareResult{
+                    .type = CompareResultType::LogicalMismatch,
+                    .message = fmt::format("Scratch {} has a mismatched Block.", n),
+                    .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}\nRelatedBlock:\n{}",
+                                        it->info(), tb_info, related_info)
+                });
+              }
+            }
+            else
+            {
+              auto cmp_result = it->compare(*r);
+              ret.insert(ret.end(), std::make_move_iterator(cmp_result.begin()),
+                         std::make_move_iterator(cmp_result.end()));
+            }
           }
-          else
-          {
-            auto[ok, ret_b, l, v] = it1->assert_equal(*r);
-            ret += ret_b;
-            value_mismatch += v;
-          }
-        }
+        };
+        match_block(blocks, sc.blocks, 1);
+        match_block(sc.blocks, blocks, 2);
       }
-      if (logic_mismatch == 0)
-        ret += "\u001b[32mPassed\u001b[0m: Value Mismatches: " + std::to_string(value_mismatch) + ", Logic Mismatchs: " + std::to_string(logic_mismatch) +
-          "\n";
-      else
-        ret +=
-            "\u001b[31Failed\u001b[0m: Value Mismatches: " + std::to_string(value_mismatch) + ", Logic Mismatchs: " + std::to_string(logic_mismatch) +
-            "\n";
       return ret;
     }
   };
-  
 }
 #endif //SCRATCH_ANALYSER_SCRATCH_HPP

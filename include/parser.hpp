@@ -32,18 +32,6 @@
 
 namespace czh
 {
-  const Block* to_toplevel(const std::vector<Block>& v, const Block* block)
-  {
-    if(block->parent_id.empty()) return block;
-    const Block* parent = nullptr;
-    for(size_t i = 0; i < v.size(); ++i)
-    {
-      if (v[i].id == block->parent_id)
-        parent = &v[i];
-    }
-    if(parent == nullptr) return block;
-    return to_toplevel(v, parent);
-  }
   class Parser
   {
   public:
@@ -94,8 +82,9 @@ namespace czh
                 .pos = pos++,
                 .id = it.key(),
                 .parent_id = b["parent"].is_null() ? "" : b["parent"].get<std::string>(),
+                .next_id = b["next"].is_null() ? "" : b["next"].get<std::string>(),
                 .opcode = opcode,
-                .input = b["inputs"],
+                .inputs = b["inputs"],
                 .fields = b["fields"],
                 .shadow = shadow,
                 .disabled = disabled,
@@ -104,61 +93,9 @@ namespace czh
                 .x = x,
                 .y = y
             });
-            if (b["next"].is_string())
-              sc.blocks.back().contained_id.emplace_back(b["next"].get<std::string>());
-            get_ids(b["inputs"], sc.blocks.back().contained_id);
           }
         }
       }
-      std::sort(sc.blocks.begin(), sc.blocks.end(), [&sc](const Block &x, const Block &y)
-      {
-        if (x.opcode != y.opcode)
-          return x.opcode < y.opcode;
-        std::vector<std::string> xn;
-        std::vector<std::string> yn;
-        // input name
-        get_name(x.input, xn);
-        get_name(y.input, yn);
-        if (xn != yn)
-          return xn < yn;
-        xn.clear();
-        yn.clear();
-        // fields name
-        get_name(x.fields, xn);
-        get_name(y.fields, yn);
-        if (xn != yn)
-          return xn < yn;
-        xn.clear();
-        yn.clear();
-        // input id
-        get_ids(x.input, xn);
-        get_ids(y.input, yn);
-        if (xn.size() != yn.size())
-          return xn.size() < yn.size();
-        xn.clear();
-        yn.clear();
-        // fields id
-        get_ids(x.fields, xn);
-        get_ids(y.fields, yn);
-        if (xn.size() != yn.size())
-          return xn.size() < yn.size();
-        xn.clear();
-        yn.clear();
-        // mutation
-        std::string xm;
-        std::string ym;
-        if (x.mutation.contains("proccode"))
-          xm = x.mutation["proccode"].get<std::string>();
-        if (y.mutation.contains("proccode"))
-          ym = y.mutation["proccode"].get<std::string>();
-        if (xm != ym)
-          return xm < ym;
-        auto t1 = to_toplevel(sc.blocks, &x);
-        auto t2 = to_toplevel(sc.blocks, &y);
-        if(t1 != nullptr && t2 != nullptr && t1->y != t2->y)
-          return t1->y < t2->y;
-        return x.pos < y.pos;
-      });
       return sc;
     }
   };
