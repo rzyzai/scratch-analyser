@@ -287,6 +287,7 @@ namespace czh
   }
   
   // TODO  Not very strong
+  // There might be bugs
   bool strong_block_equal(const std::vector<Block> &bs1, const std::vector<Block> &bs2, const Block &block1,
                           const Block &block2)
   {
