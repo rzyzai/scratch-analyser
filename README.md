@@ -27,3 +27,4 @@ std::cout << s1.assert_equal(s2) << std::endl;
 ## 依赖
 
 - [nlohmann/json](https://github.com/nlohmann/json)
+- [tfussell/miniz-cpp](https://github.com/tfussell/miniz-cpp)

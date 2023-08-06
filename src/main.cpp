@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 #include "parser.hpp"
+#include "miniz-cpp/zip_file.hpp"
 #include <iostream>
 
 int main(int argc, char** argv)
@@ -29,13 +30,27 @@ int main(int argc, char** argv)
     std::cerr << "Usage: " << argv[0] << " Scratch_path_1 Scratch_path_2" << std::endl;
     return -1;
   }
+  miniz_cpp::zip_file file1(argv[1]);
+  if (!file1.has_file("project.json"))
+  {
+    std::cerr << "Error: " << argv[1] << " can't be loaded.";
+    return -1;
+  }
+  miniz_cpp::zip_file file2(argv[2]);
+  if (!file2.has_file("project.json"))
+  {
+    std::cerr << "Error: " << argv[2] << " can't be loaded.";
+    return -1;
+  }
   czh::Parser parser;
-  std::ifstream f1(argv[1]);
-  std::ifstream f2(argv[2]);
-  auto s1 = parser.parse(nlohmann::ordered_json::parse(f1));
-  auto s2 = parser.parse(nlohmann::ordered_json::parse(f2));
+  auto s1 = parser.parse(nlohmann::ordered_json::parse(file1.read("project.json")));
+  auto s2 = parser.parse(nlohmann::ordered_json::parse(file2.read("project.json")));
   std::cout << argv[1] << ": \n" << s1.info() << std::endl;
   std::cout << argv[2] << ": \n" << s2.info() << std::endl;
   std::cout << s1.assert_equal(s2) << std::endl;
+//  auto j = nlohmann::ordered_json::parse("{\"NUM1\":[3,[12,\"过渡J2-const\",\"!aoOiWP?f/%f$S{^TI~j\"],[4,\"1\"]],\"NUM2\":[1,[4,\"20\"]]}");
+//  std::vector<std::string> n;
+//  czh::get_name(j, n);
+//  czh::get_ids(j, n);
   return 0;
 }

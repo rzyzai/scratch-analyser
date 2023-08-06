@@ -32,6 +32,18 @@
 
 namespace czh
 {
+  const Block* to_toplevel(const std::vector<Block>& v, const Block* block)
+  {
+    if(block->parent_id.empty()) return block;
+    const Block* parent = nullptr;
+    for(size_t i = 0; i < v.size(); ++i)
+    {
+      if (v[i].id == block->parent_id)
+        parent = &v[i];
+    }
+    if(parent == nullptr) return block;
+    return to_toplevel(v, parent);
+  }
   class Parser
   {
   public:
@@ -75,16 +87,22 @@ namespace czh
             nlohmann::ordered_json mutation;
             if (b.contains("mutation"))
               mutation = b["mutation"];
+            int x,y = -1;
+            if(b.contains("x")) x = b["x"].get<int>();
+            if(b.contains("y")) x = b["y"].get<int>();
             sc.blocks.emplace_back(Block{
                 .pos = pos++,
                 .id = it.key(),
+                .parent_id = b["parent"].is_null() ? "" : b["parent"].get<std::string>(),
                 .opcode = opcode,
                 .input = b["inputs"],
                 .fields = b["fields"],
                 .shadow = shadow,
                 .disabled = disabled,
                 .toplevel = toplevel,
-                .mutation = mutation
+                .mutation = mutation,
+                .x = x,
+                .y = y
             });
             if (b["next"].is_string())
               sc.blocks.back().contained_id.emplace_back(b["next"].get<std::string>());
@@ -92,7 +110,7 @@ namespace czh
           }
         }
       }
-      std::sort(sc.blocks.begin(), sc.blocks.end(), [](const Block &x, const Block &y)
+      std::sort(sc.blocks.begin(), sc.blocks.end(), [&sc](const Block &x, const Block &y)
       {
         if (x.opcode != y.opcode)
           return x.opcode < y.opcode;
@@ -135,6 +153,10 @@ namespace czh
           ym = y.mutation["proccode"].get<std::string>();
         if (xm != ym)
           return xm < ym;
+        auto t1 = to_toplevel(sc.blocks, &x);
+        auto t2 = to_toplevel(sc.blocks, &y);
+        if(t1 != nullptr && t2 != nullptr && t1->y != t2->y)
+          return t1->y < t2->y;
         return x.pos < y.pos;
       });
       return sc;
