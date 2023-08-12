@@ -42,3 +42,6 @@ auto result = scratch.compare(scratch2);
 - [nlohmann/json](https://github.com/nlohmann/json)
 - [tfussell/miniz-cpp](https://github.com/tfussell/miniz-cpp)
 - [fmtlib](https://github.com/fmtlib/fmt)
+
+## 日照一中AI社
+taskgen 来自[日照一中AI社](https://github.com/rzyzai)
