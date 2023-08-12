@@ -44,4 +44,4 @@ auto result = scratch.compare(scratch2);
 - [fmtlib](https://github.com/fmtlib/fmt)
 
 ## 日照一中AI社
-taskgen 来自[日照一中AI社](https://github.com/rzyzai)
+Scratch Analyser 来自[日照一中AI社](https://github.com/rzyzai)
