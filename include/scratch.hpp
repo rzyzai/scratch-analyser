@@ -123,6 +123,50 @@ namespace czh
     std::string info;
   };
   
+  template<typename T>
+  struct BasicValue
+  {
+    std::string name;
+    T value;
+  public:
+    bool operator==(const BasicValue &b) const
+    {
+      return name == b.name;
+    }
+    
+    std::string info() const
+    {
+      return fmt::format("  name: {}\n  value: {}", name, nlohmann::ordered_json(value).dump());
+    }
+    
+    std::vector<CompareResult> compare(const BasicValue &b) const
+    {
+      std::vector<CompareResult> ret;
+      if (name != b.name)
+      {
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = "Different name of variables.",
+            .info = fmt::format("({}, {})", name, b.name)
+        });
+      }
+      if (value != b.value)
+      {
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::ValueMisMatch,
+            .message = "Different value of variables.",
+            .info = fmt::format("({}, {}, {})", name,
+                                nlohmann::ordered_json(value).dump(),
+                                nlohmann::ordered_json(b.value).dump())
+        });
+      }
+      return ret;
+    }
+  };
+  
+  using Variable = BasicValue<std::string>;
+  using List = BasicValue<std::vector<std::string>>;
+  
   struct Block
   {
     size_t pos;
@@ -306,14 +350,99 @@ namespace czh
       return false;
   }
   
+  template<typename T>
+  void match_basic_value(const std::vector<T> &bs1, const std::vector<T> &bs2, const std::string &name,
+                         const std::string &type,
+                         std::vector<CompareResult> &ret)
+  {
+    for (auto it
+        = bs1.cbegin(); it != bs1.cend(); ++it)
+    {
+      auto r = find_with_hint<T>(bs2.cbegin(), bs2.cend(), bs2.cbegin() + (it - bs1.cbegin()), *it);
+      if (r == bs2.cend())
+      {
+        ret.emplace_back(CompareResult{
+            .type = CompareResultType::LogicalMismatch,
+            .message = fmt::format("Scratch {} has a mismatched {}.", name, type),
+            .info = fmt::format("{} Info:\n{}", type, it->info())
+        });
+      }
+      else
+      {
+        auto cmp_result = it->compare(*r);
+        ret.insert(ret.end(), std::make_move_iterator(cmp_result.begin()),
+                   std::make_move_iterator(cmp_result.end()));
+      }
+    }
+  }
+  
+  void match_block(const std::vector<Block> &bs1, const std::vector<Block> &bs2,
+                   const std::string &name, std::vector<CompareResult> &ret)
+  {
+    for (auto it
+        = bs1.cbegin(); it != bs1.cend(); ++it)
+    {
+      auto r = find_if_with_hint<Block>(
+          bs2.cbegin(), bs2.cend(),
+          bs2.cbegin() + (it - bs1.cbegin()),
+          [&it, &bs1, &bs2](const Block &block) -> bool
+          {
+            return strong_block_equal(bs1, bs2, *it, block);
+          });
+      if (r == bs2.cend())
+      {
+        const Block *b = &*it;
+        auto tb = to_toplevel(bs1, b);
+        std::string tb_info = "Failed to get toplevel.";
+        if (tb != nullptr)
+          tb_info = tb->info();
+        
+        if (tb != nullptr && tb->opcode != "procedures_definition")
+        {
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::LogicalMismatch,
+              .message = fmt::format("Scratch {} has a mismatched Block.", name),
+              .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}",
+                                  it->info(), tb_info)
+          });
+        }
+        else if (tb != nullptr)
+        {
+          std::string related_info = "Failed to get related block.";
+          for (auto &rel: bs1)
+          {
+            if (rel.parent_id == tb->id && rel.opcode == "procedures_prototype")
+            {
+              related_info = rel.info();
+              break;
+            }
+          }
+          ret.emplace_back(CompareResult{
+              .type = CompareResultType::LogicalMismatch,
+              .message = fmt::format("Scratch {} has a mismatched Block.", name),
+              .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}\nRelatedBlock:\n{}",
+                                  it->info(), tb_info, related_info)
+          });
+        }
+      }
+      else
+      {
+        auto cmp_result = it->compare(*r);
+        ret.insert(ret.end(), std::make_move_iterator(cmp_result.begin()),
+                   std::make_move_iterator(cmp_result.end()));
+      }
+    }
+  }
+  
   class Parser;
   
   class Scratch
   {
     friend Parser;
   private:
-    std::map<std::string, std::string> vars;
-    std::map<std::string, std::vector<std::string>> lists;
+    std::string name;
+    std::vector<Variable> vars;
+    std::vector<List> lists;
     std::vector<Block> blocks;
   public:
     std::string info() const
@@ -333,28 +462,10 @@ namespace czh
             .info = fmt::format("({}, {})", vars.size(), sc.vars.size())
         });
       }
-      for (auto it1 = vars.cbegin(), it2 = sc.vars.cbegin(); it1 != vars.cend(); ++it1, ++it2)
-      {
-        if (it1->first != it2->first)
-        {
-          ret.emplace_back(CompareResult{
-              .type = CompareResultType::LogicalMismatch,
-              .message = "Different name of variables.",
-              .info = fmt::format("({}, {})", it1->first, it2->first)
-          });
-        }
-      }
-      for (auto it1 = vars.cbegin(), it2 = sc.vars.cbegin(); it1 != vars.cend(); ++it1, ++it2)
-      {
-        if (it1->second != it2->second)
-        {
-          ret.emplace_back(CompareResult{
-              .type = CompareResultType::ValueMisMatch,
-              .message = "Different value of variables.",
-              .info = fmt::format("({}, {}, {})", it1->first, it1->second, it2->second)
-          });
-        }
-      }
+      
+      match_basic_value<Variable>(vars, sc.vars, name, "Variable", ret);
+      match_basic_value<Variable>(sc.vars, vars, sc.name, "Variable", ret);
+      
       // Lists
       if (lists.size() != sc.lists.size())
       {
@@ -364,30 +475,9 @@ namespace czh
             .info = fmt::format("({}, {})", lists.size(), sc.lists.size())
         });
       }
-      for (auto it1 = lists.cbegin(), it2 = sc.lists.cbegin(); it1 != lists.cend(); ++it1, ++it2)
-      {
-        if (it1->first != it2->first)
-        {
-          ret.emplace_back(CompareResult{
-              .type = CompareResultType::LogicalMismatch,
-              .message = "Different name of lists.",
-              .info = fmt::format("({}, {})", it1->first, it2->first)
-          });
-        }
-      }
-      for (auto it1 = lists.cbegin(), it2 = sc.lists.cbegin(); it1 != lists.cend(); ++it1, ++it2)
-      {
-        if (it1->second != it2->second)
-        {
-          ret.emplace_back(CompareResult{
-              .type = CompareResultType::ValueMisMatch,
-              .message = "Different value of lists.",
-              .info = fmt::format("({}, {}, {})", it1->first,
-                                  nlohmann::ordered_json(it1->second).dump(),
-                                  nlohmann::ordered_json(it2->second).dump())
-          });
-        }
-      }
+      
+      match_basic_value<List>(lists, sc.lists, name, "List", ret);
+      match_basic_value<List>(sc.lists, lists, sc.name, "List", ret);
       // Blocks
       if (blocks.size() != sc.blocks.size())
       {
@@ -397,64 +487,8 @@ namespace czh
             .info = fmt::format("({}, {})", blocks.size(), sc.blocks.size())
         });
       }
-      auto match_block = [&ret](const std::vector<Block> &bs1, const std::vector<Block> &bs2, int n)
-      {
-        for (auto it
-            = bs1.cbegin(); it != bs1.cend(); ++it)
-        {
-          auto r = find_if_with_hint<Block>(
-              bs2.cbegin(), bs2.cend(),
-              bs2.cbegin() + (it - bs1.cbegin()),
-              [&it, &bs1, &bs2](const Block &block) -> bool
-              {
-                return strong_block_equal(bs1, bs2, *it, block);
-              });
-          if (r == bs2.cend())
-          {
-            const Block *b = &*it;
-            auto tb = to_toplevel(bs1, b);
-            std::string tb_info = "Failed to get toplevel.";
-            if (tb != nullptr)
-              tb_info = tb->info();
-            
-            if (tb != nullptr && tb->opcode != "procedures_definition")
-            {
-              ret.emplace_back(CompareResult{
-                  .type = CompareResultType::LogicalMismatch,
-                  .message = fmt::format("Scratch {} has a mismatched Block.", n),
-                  .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}",
-                                      it->info(), tb_info)
-              });
-            }
-            else if (tb != nullptr)
-            {
-              std::string related_info = "Failed to get related block.";
-              for (auto &rel: bs1)
-              {
-                if (rel.parent_id == tb->id && rel.opcode == "procedures_prototype")
-                {
-                  related_info = rel.info();
-                  break;
-                }
-              }
-              ret.emplace_back(CompareResult{
-                  .type = CompareResultType::LogicalMismatch,
-                  .message = fmt::format("Scratch {} has a mismatched Block.", n),
-                  .info = fmt::format("Block Info:\n{}\nTopLevelBlock Info:\n{}\nRelatedBlock:\n{}",
-                                      it->info(), tb_info, related_info)
-              });
-            }
-          }
-          else
-          {
-            auto cmp_result = it->compare(*r);
-            ret.insert(ret.end(), std::make_move_iterator(cmp_result.begin()),
-                       std::make_move_iterator(cmp_result.end()));
-          }
-        }
-      };
-      match_block(blocks, sc.blocks, 1);
-      match_block(sc.blocks, blocks, 2);
+      match_block(blocks, sc.blocks, name, ret);
+      match_block(sc.blocks, blocks, sc.name, ret);
       return ret;
     }
   };

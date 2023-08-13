@@ -43,8 +43,8 @@ int main(int argc, char** argv)
     return -1;
   }
   czh::Parser parser;
-  auto s1 = parser.parse(nlohmann::ordered_json::parse(file1.read("project.json")));
-  auto s2 = parser.parse(nlohmann::ordered_json::parse(file2.read("project.json")));
+  auto s1 = parser.parse(argv[1], nlohmann::ordered_json::parse(file1.read("project.json")));
+  auto s2 = parser.parse(argv[2], nlohmann::ordered_json::parse(file2.read("project.json")));
   fmt::println("{}:\n {}", argv[1], s1.info());
   fmt::println("{}:\n {}", argv[2], s2.info());
   auto cmp_result =  s1.compare(s2);

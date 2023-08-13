@@ -35,9 +35,10 @@ namespace czh
   class Parser
   {
   public:
-    Scratch parse(const nlohmann::ordered_json &project)
+    Scratch parse(const std::string& name, const nlohmann::ordered_json &project)
     {
       Scratch sc;
+      sc.name = name;
       for (auto &r: project["targets"])
       {
         if (r["isStage"].get<bool>())
@@ -45,9 +46,9 @@ namespace czh
           for (auto &v: r["variables"])
           {
             if (v[1].is_string())
-              sc.vars[v[0]] = v[1].get<std::string>();
+              sc.vars.emplace_back(Variable{v[0].get<std::string>(), v[1].get<std::string>()});
             else
-              sc.vars[v[0]] = to_string(v[1]);
+              sc.vars.emplace_back(Variable{v[0].get<std::string>(), to_string(v[1])});
           }
           for (auto &v: r["lists"])
           {
@@ -59,7 +60,7 @@ namespace czh
               else
                 list.emplace_back(to_string(lv));
             }
-            sc.lists[v[0]] = list;
+            sc.lists.emplace_back(List{v[0].get<std::string>(), list});
           }
         }
         else if (r.contains("isDevice") && r["isDevice"].get<bool>())
@@ -75,9 +76,9 @@ namespace czh
             nlohmann::ordered_json mutation;
             if (b.contains("mutation"))
               mutation = b["mutation"];
-            int x,y = -1;
-            if(b.contains("x")) x = b["x"].get<int>();
-            if(b.contains("y")) x = b["y"].get<int>();
+            int x, y = -1;
+            if (b.contains("x")) x = b["x"].get<int>();
+            if (b.contains("y")) x = b["y"].get<int>();
             sc.blocks.emplace_back(Block{
                 .pos = pos++,
                 .id = it.key(),
